@@ -229,7 +229,7 @@ agent 发布的岗位**总是**进入审核流程，`posting_id` 以 `agent_` �
 | `intro` | string | 列表卡片上展示的一句话简介。 |
 | `description` | string | JD 正文。 |
 | `requirements` | string | 招聘要求。 |
-| `location` | string | 工作地点，多个地点用 `/` 分隔（如 `北京 / 上海`）。 |
+| `location` | string | 工作地点。**只有确实有多个地点时**才用 `/` 分隔（如 `北京 / 上海`）；单个地点直接写（如 `北京`），不要带斜杠；地点未知就**省略该字段**，不要传 `/`、`远程 /` 这类残缺值。 |
 | `source_url` | string | 原帖 / 主页链接，必须以 `http(s)://` 开头（不做可达性探测）。建议填，方便审核人核对来源。 |
 | `role_tags` | string[] | 岗位标签，≤5 个，每个 ≤7 字符（如 `["CV", "多模态"]`）。被 `role_tag` 搜索过滤器使用。 |
 | `referral_code` | string | 内推码，≤64 字符。 |
