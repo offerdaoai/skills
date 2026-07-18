@@ -299,7 +299,7 @@ curl -s "$OFFERDAO_BASE/api/postings/agent" \
 公司对象关键字段：`company_id` / `name` / `company_tag`（同搜索的 5 值枚举）/ `stage`（阶段，如融资轮次）/ `tags[]` / `location` / `company_intro` / `team_members[]` / `funding_rounds[]` / `products[]` / `news_links[]` / `interview_links[]` / `open_positions[]`。完整结构见 `references/company-object.md`。要点：
 
 - `open_positions` 是该公司在招岗位的**精简版**（≤8 条，不含 JD 正文与联系方式）。**搜索接口没有按 `posting_id` 查询的参数**——要完整信息，按 `organization` 搜索后在结果里对 `posting_id` 匹配，或直接给岗位短链 `$OFFERDAO_BASE/j/<posting_id>`（详情页信息完整）。
-- 公司的 `logo_url` 仍可能是很大的 base64（与岗位不同，岗位在公开返回里已换成图片端点 URL）——转述时一律置 `null`。
+- 公司的 `logo_url` 与岗位同款：**相对路径的图片端点**（`/api/companies/<id>/logo?v=…`，拼上 `$OFFERDAO_BASE` 可直接用作图片地址；也可能是 http(s) 绝对地址或空串）。老版本服务端可能仍返回大 base64——遇到 `data:image/` 开头的值转述时置 `null`。
 - 推荐公司给用户时可以给公司详情页短链：`$OFFERDAO_BASE/c/<company_id>`。
 
 ```bash
@@ -326,7 +326,7 @@ curl -s "$OFFERDAO_BASE/api/companies" \
       "direction": "多模态",                       // 岗位方向短标签，可能为空串
       "job_type": "算法",                          // 岗位类型短标签，可能为空串
       "company": "字节跳动",                       // 可能为空串
-      "logo_url": "data:image/..." | "",           // ⚠️ 有值时是大 base64，转述时置 null
+      "logo_url": "/api/guides/<id>/logo?v=…" | "", // 图片端点相对路径（老服务端可能是大 base64，遇 data: 置 null）
       "published_at": "2026-06-20",                // 可能为空串
       "created_at": 1750000000,                    // unix 秒
       "updated_at": 1750000000
