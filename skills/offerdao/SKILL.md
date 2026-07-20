@@ -61,29 +61,43 @@ curl -s "$OFFERDAO_BASE/api/postings/search?limit=1" \
 
 > 说明：搜索接口对「网站自身的同源浏览」会放行匿名访客（方便普通用户在站内逛岗位）；但你是**程序化调用**，不带同源标记，因此搜索和发布**都必须带 key**，不要假设搜索可以匿名。
 
-### 快速上手：自助领取开放测试 key（免注册）
+### 第 0 步：解析 key（会话开头做一次，优先复用本地个人 key）
 
-还没有 key 时，可以先程序化领一把**开放测试 key**直接体验（无需注册 / 登录）：
+调用任何需鉴权的接口前，先按下面的**优先级**解析出 `OFFERDAO_API_KEY`，**整个会话只解析一次**、后续复用。**总原则：优先用用户本人的个人 key；开放测试 key 只作最后兜底，且仅有查询权限、不能发布。**
+
+优先级从高到低：
+
+1. **环境变量 `OFFERDAO_API_KEY`** —— 用户本人的个人 key，最高优先。
+2. **本地 `~/.offerdao/config.json` 的 `apiKey`** —— 装过本地 daemon 就有，同样是用户本人的个人 key；走到这步就有 key，用户**不用每次手动粘贴**。
+3. **引导用户拿个人 key** —— 上面都没有时，引导用户去「我的设置 → API keys」创建 / 复制一把个人 key（**发布岗位必须走到这步**；拿到后 `save_key_local` 写回本地，下次自动复用）。
+4. **最后兜底：开放测试 key** —— 仅当用户**只查询、又暂时拿不到个人 key**时，才自助领一把开放测试 key 应急。**它只有查询权限**（发布会 `403 scope_forbidden`），且有额度 / 有效期，属临时体验，**不写回本地**。
+
+前两级（环境变量 → 本地 config.json）用一段脚本自动解析：
 
 ```bash
-OFFERDAO_API_KEY=$(curl -s "$OFFERDAO_BASE/api/agent/test-key" | jq -er '.key // empty')
-[ -n "$OFFERDAO_API_KEY" ] || echo "没领到 key（404 等）——改走下面的「获取个人 API key」"
+# 本地凭据文件（本地 daemon 装过就有；路径可用 OFFERDAO_CONFIG 覆盖）
+OFFERDAO_CONFIG="${OFFERDAO_CONFIG:-$HOME/.offerdao/config.json}"
+
+# ① 环境变量已设置就直接用；② 否则尝试读本地 config.json 里的 apiKey
+if [ -z "$OFFERDAO_API_KEY" ] && [ -f "$OFFERDAO_CONFIG" ]; then
+  OFFERDAO_API_KEY=$(jq -r '.apiKey // empty' "$OFFERDAO_CONFIG" 2>/dev/null)
+fi
 ```
 
-- 成功返回 `{ "key": "sk-..." }`；暂无可用 key 时返回 `404`。**领取失败时变量是空的**——先确认非空再继续，不要带着空值或字符串 `null` 去发请求（那会得到 401，误导你以为 key 失效）。
-- 开放 key 用法和普通 key 完全一样（放进 `OFFERDAO_API_KEY`、带鉴权头），但**只有查询权限（搜索 / 精选）**——用它调发布接口会得到 `403 scope_forbidden`。发布岗位请直接用个人 key（见下），不要拿开放 key 反复试。
-- **仅供测试 / 体验**：设有**有效期**与**每日调用上限**；该端点本身也按 IP 限流——领一次存进环境变量复用，不要每次请求前都领。
-- 一旦开放 key **失效 / 过期（`401`）、权限不足（`403`）或超出当日上限（`429`）**，改用**个人 API key**（见下）；个人 key 具备查询与发布的全部权限，发布的岗位会归属到本人，可在登录态「我的发布」里查看 / 管理。
+- **解析到非空 key** → 直接用它调接口（建议先跑一次连通性探测确认有效，见「Base URL」；若返回 `401` 见「本地 key 失效」）。
+- **仍为空**（既没设环境变量、也没有本地 config.json 或其中无 `apiKey`）→ 按上面 **第 3 级优先引导用户拿个人 key**（发布场景必须如此）；只有「**仅查询、且暂时拿不到个人 key**」时，才退到 **第 4 级** 领开放测试 key 应急。
 
-### 如何获取个人 API key（一步步）
+> `~/.offerdao/config.json` 是本地 daemon 的配置文件（明文 JSON，权限 600）。这里**只读** `apiKey` 字段来复用；写回见「本地 key 失效」，只更新 `apiKey`、保留其它字段。没装 daemon 的用户没有这个文件，按上面的「仍为空」分支处理。
 
-个人 key 需登录后在网站上自助创建。引导用户按下面的步骤拿到 key：
+### 首选：获取个人 API key（发布必需，查询也推荐）
+
+个人 key 是**首选**来源——具备查询 + 发布全部权限，发布的岗位归属到本人、可在登录态「我的发布」里管理。需登录后在网站上自助创建，引导用户按下面的步骤拿到：
 
 1. **打开网站并登录**：浏览器访问 `$OFFERDAO_BASE`（默认 `https://offerdao.ai`），点右上角**登录 / 注册**，用邮箱或 Google 登录。
 2. **进入设置**：登录后点右上角**头像**，在菜单里选**我的设置**。
 3. **切到 API keys**：在设置弹窗左侧栏点 **API keys** 标签。
 4. **新建 key**：点**新建 key**，系统会生成一个 `sk-` 开头的字符串。**新建后请立刻复制保存**——它与你的账号绑定（也可随时回到该页「查看 / 复制」已有的 key）。
-5. **填进环境变量**：把复制到的 key 交给 agent，存进 `OFFERDAO_API_KEY`，后续所有请求复用。
+5. **交给 agent 并持久化**：把 key 交给 agent 存进 `OFFERDAO_API_KEY`；并用「本地 key 失效」里的 `save_key_local` 写回 `~/.offerdao/config.json`，之后「第 0 步」自动复用，**下次会话免手输**。
 
 > 整条路径：登录 `$OFFERDAO_BASE` → 右上角**头像 → 我的设置 → API keys → 新建 key** → 复制保存。
 
@@ -92,6 +106,22 @@ OFFERDAO_API_KEY=$(curl -s "$OFFERDAO_BASE/api/agent/test-key" | jq -er '.key //
 ```bash
 OFFERDAO_API_KEY="${OFFERDAO_API_KEY:-sk-请替换成你的key}"
 ```
+
+### 兜底：自助领取开放测试 key（免注册，仅查询、不能发布）
+
+**仅当用户只想查询、又暂时拿不到个人 key**时，才领一把**开放测试 key**应急（无需注册 / 登录）；发布岗位一律用上面的个人 key。
+
+```bash
+OFFERDAO_API_KEY=$(curl -s "$OFFERDAO_BASE/api/agent/test-key" | jq -er '.key // empty')
+[ -n "$OFFERDAO_API_KEY" ] || echo "没领到 key（404 等）——引导用户按上面「首选：获取个人 API key」创建"
+```
+
+- 成功返回 `{ "key": "sk-..." }`；暂无可用 key 时返回 `404`。**领取失败时变量是空的**——先确认非空再继续，不要带着空值或字符串 `null` 去发请求（那会得到 401，误导你以为 key 失效）。
+- **只有查询权限（搜索 / 精选）**——用它调发布接口会得到 `403 scope_forbidden`。**发布岗位一律用个人 key（见上）**，不要拿开放 key 反复试；也**绝不把开放 key `save_key_local` 写回本地**（会覆盖 / 污染本地个人 key）。
+- **仅供测试 / 体验**：设有**有效期**与**每日调用上限**；该端点本身也按 IP 限流——领一次存进环境变量复用，不要每次请求前都领。
+- 一旦开放 key **失效 / 过期（`401`）、权限不足（`403`）或超出当日上限（`429`）**，改用**个人 API key**（见上）。
+
+### 带上鉴权头（所有请求通用）
 
 每个请求带上鉴权头，两种写法二选一：
 
@@ -103,7 +133,33 @@ OFFERDAO_API_KEY="${OFFERDAO_API_KEY:-sk-请替换成你的key}"
 
 > **key 与用户绑定。** 用某个个人 key 发布的岗位会归属到该 key 的拥有者——发布后岗位会出现在 TA 登录态的「我的发布」里（待审核状态）。所以发布前要确认你用的是**用户本人**的 key（或明确告知用户正在用开放测试 key、岗位不会归属到 TA）。
 >
-> 没有 key / key 无效时：搜索与发布都会返回 `401`（`{ "error": "missing_api_key" }` 或 `{ "error": "invalid_api_key" }`）。此时先试自助领取开放测试 key；领不到再引导用户去「我的设置 → API keys」创建。**不要绕过鉴权，也不要伪造 key**。
+> 没有 key / key 无效时：搜索与发布都会返回 `401`（`{ "error": "missing_api_key" }` 或 `{ "error": "invalid_api_key" }`）。**不要绕过鉴权，也不要伪造 key**。
+
+### 本地 key 失效 / 拿到新 key：写回本地（下次免输入）
+
+带着「第 0 步」从 `~/.offerdao/config.json` 读出的 key 调接口却返回 `401 invalid_api_key`，说明这把本地 key 已失效。**如实告诉用户**它失效了，引导 TA 去「我的设置 → API keys」拿一把新的个人 key——skill **无法替用户自动创建个人 key**（个人 key 必须登录网站生成）。拿到用户给的新 key 后，帮 TA 写回本地，之后就不用再手动输入：
+
+```bash
+# 把新的【个人】key 写回本地 config.json（保留 serverUrl 等已有字段，权限 600）
+save_key_local() {
+  local newkey="$1"
+  OFFERDAO_CONFIG="${OFFERDAO_CONFIG:-$HOME/.offerdao/config.json}"
+  mkdir -p "$(dirname "$OFFERDAO_CONFIG")"
+  local tmp; tmp=$(mktemp)
+  if [ -f "$OFFERDAO_CONFIG" ]; then
+    jq --arg k "$newkey" '.apiKey = $k' "$OFFERDAO_CONFIG" > "$tmp"
+  else
+    jq -n --arg k "$newkey" '{apiKey: $k}' > "$tmp"
+  fi
+  mv "$tmp" "$OFFERDAO_CONFIG" && chmod 600 "$OFFERDAO_CONFIG"
+  OFFERDAO_API_KEY="$newkey"   # 当前会话也立即生效
+}
+# 用法：save_key_local "sk-用户新给的个人key"
+```
+
+> **只写个人 key，绝不写开放测试 key。** 开放测试 key 是共享的、仅查询、会过期——把它写进 config.json 会覆盖用户原本的个人 key、污染本地 daemon 配置。只有当 key 是**用户本人的个人 key**时才 `save_key_local`。
+>
+> 写回只保证**本 skill / agent 下次会话免手输**。本地 daemon 自身用哪把 key，若它经开机自启（launchd/systemd）的环境变量启动，则由那份自启配置决定，不受这里写回 config.json 影响——那属于 daemon 运维，不在本 skill 范围。
 
 ## 接口一：搜索岗位 `GET /api/postings/search`
 
@@ -232,7 +288,7 @@ agent 发布的岗位**总是**进入审核流程，`posting_id` 以 `agent_` �
 
 ### 发布流程（agent 应遵循的步骤）
 
-0. **确认有 key**：发布必须带 API key（见「鉴权」）。没有就先试自助领开放测试 key，或引导用户创建个人 key；用个人 key 时确认是**用户本人**的（岗位会归属到 key 拥有者）。
+0. **确认有 key**：发布必须带 API key（见「鉴权」）。先按「第 0 步」解析本地个人 key（环境变量 → `~/.offerdao/config.json`）；没有就引导用户创建个人 key——**发布必须用个人 key**（开放测试 key 无发布权限，会 `403`），并确认是**用户本人**的（岗位会归属到 key 拥有者）。
 1. **拿到原始内容**：按上面「输入来源与解析」处理——文本直接解析；URL 先用 browser-act 抓取正文再解析（未装则先帮用户装）。
 2. **解析并填字段**：通读内容，尽可能多地填好字段，能填尽填。
 3. **判断单岗位 / 多岗位**：同一家公司（同一个帖子或链接）里有多个岗位，**合并成一张卡片**（用 `positions`）；**绝不要拆成多张卡片分别发布**；只有不同公司才分多张卡片。
@@ -387,6 +443,26 @@ curl -s "$OFFERDAO_BASE/api/news/feed" | jq --arg since "$SINCE" '
 
 回答用户时，每条给出 **日期、标题、来源（source）、一句话摘要、原文链接（url）**，按日期倒序排列；命中多类的资讯不要重复列。
 
+## skill 版本与更新（自检）
+
+本 skill 会随 Offer岛线上持续演进（新增端点、字段、用法）。按过时的本地副本调用可能与实际行为对不上，值得留意本地这份是否最新。
+
+- **装了本地 daemon 的用户**：daemon 会在后台定期（约每 30 分钟，含启动时）比对线上最新版、**自动覆盖更新**本地 SKILL.md（首次安装也走这条），一般无需手动干预。
+- **没装 daemon，或在网页内联 agent 里**：不会自动更新。若怀疑文档过时（例如按文档调用却与实际返回对不上），主动核对一次：
+
+```bash
+# 拉线上最新 SKILL.md，与本地已装的这份比对。
+# <本地路径> = 你的 skill 安装目录下的 SKILL.md（如 Claude Code 的 skills 目录）。
+curl -fsS "$OFFERDAO_BASE/skill.md" -o /tmp/offerdao-skill-latest.md
+if diff -q /tmp/offerdao-skill-latest.md "<本地路径>/SKILL.md" >/dev/null 2>&1; then
+  echo "✅ 本地 offerdao skill 已是最新"
+else
+  echo "⚠️ 本地 offerdao skill 落后于线上——建议更新后再继续"
+fi
+```
+
+- 发现落后时，**如实提示用户**"本地 offerdao skill 不是最新版，建议更新"，别默默按可能过时的文档操作：装了 daemon 的等它自动更新（或重启 daemon 立即触发）；没装的重新安装 / 拉取最新 skill。
+
 ## 限流与错误处理
 
 岗位搜索 / 精选 / 发布、公司目录、面经攻略、资讯 feed 都有按 IP 的频率限制（读接口较宽松，发布较严格）；`/news/md` 原文入口带 60 秒公共缓存，正常抓取不会撞限。受限端点的每个响应都带 `X-RateLimit-Remaining` 头，告诉你当前剩余配额。
@@ -420,7 +496,7 @@ HTTP 401
 { "error": "invalid_api_key" }   // key 无效 / 已被删除
 ```
 
-撞到 401 时**不要用原 key 重试**：开放测试 key 401 说明已失效——最多重新领**一次**（领到的还是 401 就转个人 key，不要循环重领）；个人 key 401 则引导用户去「我的设置 → API keys」确认 / 重建。
+撞到 401 时**不要用原 key 重试**：开放测试 key 401 说明已失效——最多重新领**一次**（领到的还是 401 就转个人 key，不要循环重领）；个人 key 401 则引导用户去「我的设置 → API keys」确认 / 重建。若这把 401 的 key 是「第 0 步」从本地 `~/.offerdao/config.json` 读出来的，按个人 key 处理：告知用户本地 key 已失效、引导拿新个人 key，再用「本地 key 失效」里的 `save_key_local` 写回，下次即可免手输。
 
 **权限不足（403）：**
 
@@ -437,7 +513,8 @@ key 本身有效，但没有该操作的权限——典型场景是**拿开放�
 
 ## 注意事项 / 易踩的坑
 
-- **搜索（含精选）和发布必须带 API key；公司目录 / 面经攻略 / 行业资讯不用。** 只查不发时先试 `GET /api/agent/test-key` 自助领开放测试 key（**仅查询权限，发布会 `403`**）；发布需个人 key，在「我的设置 → API keys」自助创建。key 放进 `OFFERDAO_API_KEY` 复用，**别写死、别外泄、别伪造**。
+- **会话开头先复用本地 key（第 0 步）。** 按 `环境变量 OFFERDAO_API_KEY → ~/.offerdao/config.json 的 apiKey` 解析（装过本地 daemon 就自动复用，用户免手输）；本地 key 失效时引导用户换个人 key 并 `save_key_local` 写回本地，下次继续免输入。**只写个人 key，别把开放测试 key 写回**。详见「鉴权：API key」。
+- **搜索（含精选）和发布必须带 API key；公司目录 / 面经攻略 / 行业资讯不用。** 一律**优先用个人 key**（环境变量 → 本地 `~/.offerdao/config.json`，见「第 0 步」）；只查不发、又暂时拿不到个人 key 时，才领 `GET /api/agent/test-key` 开放测试 key 兜底（**仅查询权限，发布会 `403`**）；发布必须用个人 key，在「我的设置 → API keys」自助创建。key 放进 `OFFERDAO_API_KEY` 复用，**别写死、别外泄、别伪造**。
 - **发布需要个人 key，岗位归属到 key 拥有者。** 用谁的个人 key 发，岗位就进谁的「我的发布」（待审核）；开放测试 key 没有发布权限（`403 scope_forbidden`）。务必让用户清楚这一点。
 - **域名可配置，绝不写死。** 默认是 `https://offerdao.ai`（后续可能更换）；将来换新域名时，通过 `OFFERDAO_BASE` 切换即可。
 - **只能搜到已审核的。** 搜索永远看不到未通过审核的岗位。通过 agent 端点刚发布的岗位，在管理员审核通过前搜不到。
@@ -456,4 +533,4 @@ key 本身有效，但没有该操作的权限——典型场景是**拿开放�
 
 - 用户想**自己在网站上填表发布** → 引导他去站点首页（`$OFFERDAO_BASE/`）。只有当用户把 JD / 招聘原文交给*你*、让你代为提交时，才用上面的 agent 发布端点。
 - 用户想**审核**（通过 / 拒绝岗位）或**编辑公司目录 / 面经攻略** → 这些是管理员专属，不通过本 skill。
-- 用户**还没有 API key** → 只是查询的话先试 `GET /api/agent/test-key` 自助领开放测试 key；领不到（404）或需要**发布**（测试 key 无发布权限）就引导去「我的设置 → API keys」创建个人 key，别试图绕过鉴权。**公司目录、面经攻略、行业资讯不受影响**——没有 key 也照常可查。
+- 用户**还没有 API key** → 先按「第 0 步」看本地 / 环境变量里有没有个人 key；都没有时，**优先**引导去「我的设置 → API keys」创建个人 key。只是查询、又暂时拿不到个人 key，才用 `GET /api/agent/test-key` 领开放测试 key 兜底（领不到会 404）；**发布必须用个人 key**（测试 key 无发布权限）。别试图绕过鉴权。**公司目录、面经攻略、行业资讯不受影响**——没有 key 也照常可查。
